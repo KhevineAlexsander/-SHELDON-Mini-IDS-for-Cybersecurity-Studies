@@ -1,73 +1,194 @@
-Criado por Khévine Nunes
-Desenvolvido com apoio de Inteligência Artificial como ferramenta de aceleração de aprendizado.
+import os
+import csv
+import time
+import socket
+from datetime import datetime
+from collections import defaultdict
+from scapy.all import sniff, IP, TCP, UDP, sr1
 
+# ================= ASSINATURA =================
 
+def banner():
+    print("\033[96m")
+    print("               ⚛")
+    print("        ███████╗██╗  ██╗███████╗██╗     ██████╗  ██████╗ ███╗   ██╗")
+    print("        ██╔════╝██║  ██║██╔════╝██║     ██╔══██╗██╔═══██╗████╗  ██║")
+    print("        ███████╗███████║█████╗  ██║     ██║  ██║██║   ██║██╔██╗ ██║")
+    print("        ╚════██║██╔══██║██╔══╝  ██║     ██║  ██║██║   ██║██║╚██╗██║")
+    print("        ███████║██║  ██║███████╗███████╗██████╔╝╚██████╔╝██║ ╚████║")
+    print("        ╚══════╝╚═╝  ╚═╝╚══════╝╚══════╝╚═════╝  ╚═════╝ ╚═╝  ╚═══╝")
+    print("\n                Criado por Khévine Nunes")
+    print("\033[0m")
 
+# ================= CONFIGURAÇÕES =================
 
-📌 Sobre o Projeto
+logs = []
+salvar_em_arquivo = False
+diretorio_salvamento = ""
+formato_log = "txt"
+nome_personalizado = ""
 
-SHELDON é um Mini IDS (Intrusion Detection System) desenvolvido em Python com foco educacional, voltado para estudos práticos de Cibersegurança e preparação para atuação em SOC (Security Operations Center).
+portas_filtradas = []
+contador_ips = defaultdict(int)
+portas_por_ip = defaultdict(set)
+tempo_primeiro_pacote = defaultdict(float)
 
-O projeto foi desenvolvido como parte do meu processo de transição de carreira para a área de tecnologia, utilizando Inteligência Artificial como ferramenta de apoio no desenvolvimento, refinamento do código e boas práticas de documentação.
+LIMITE_PORTAS = 10
+JANELA_TEMPO = 10
 
-A IA foi utilizada como assistente técnico — mas toda lógica, compreensão e validação foram realizadas manualmente como parte do processo de aprendizado.
+VERDE = "\033[92m"
+VERMELHO = "\033[91m"
+AMARELO = "\033[93m"
+RESET = "\033[0m"
 
-🎯 Objetivo
+# ================= FUNÇÕES DE VALIDAÇÃO =================
 
-Praticar análise de tráfego de rede
+def input_opcao(mensagem, opcoes_validas):
+    while True:
+        escolha = input(mensagem).strip()
+        if escolha in opcoes_validas:
+            return escolha
+        print("❌ Opção inválida.")
 
-Entender funcionamento de protocolos TCP/IP
+def input_sn(mensagem):
+    while True:
+        escolha = input(mensagem + " (S/n): ").strip()
 
-Simular monitoramento de eventos em ambiente SOC
+        if escolha == "":
+            return True
 
-Desenvolver raciocínio defensivo (Blue Team)
+        if escolha.upper() == "S":
+            return True
+        elif escolha.upper() == "N":
+            return False
 
-Aplicar Python em cenários reais de segurança
+        print("❌ Digite apenas S ou N.")
 
-🔍 Funcionalidades
+# ================= ANALISAR PACOTES =================
 
-✔ Monitoramento de pacotes em tempo real
-✔ Monitoramento por tempo determinado
-✔ Filtro por portas específicas
-✔ Detecção básica de Port Scan (análise por janela de tempo)
-✔ Contador de IPs mais ativos
-✔ Geração de logs em TXT ou CSV
-✔ Escaneamento TCP (SYN Scan básico)
-✔ Interface interativa no terminal
-✔ Sistema de alertas colorido
+def analisar_pacote(pacote):
+    global logs
 
-🧠 Conceitos Técnicos Aplicados
+    if pacote.haslayer(IP):
+        ip_origem = pacote[IP].src
+        ip_destino = pacote[IP].dst
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-Packet Sniffing (Scapy)
+        porta_destino = None
+        protocolo = "IP"
 
-TCP Handshake
+        if pacote.haslayer(TCP):
+            porta_destino = pacote[TCP].dport
+            protocolo = "TCP"
+        elif pacote.haslayer(UDP):
+            porta_destino = pacote[UDP].dport
+            protocolo = "UDP"
 
-Análise comportamental básica
+        if portas_filtradas:
+            if porta_destino not in portas_filtradas:
+                return
 
-Estruturas de dados para correlação de eventos
+        contador_ips[ip_origem] += 1
+        suspeito = False
 
-Monitoramento passivo
+        if porta_destino:
+            agora = time.time()
 
-Princípios de detecção de intrusão
+            if tempo_primeiro_pacote[ip_origem] == 0:
+                tempo_primeiro_pacote[ip_origem] = agora
 
-🤖 Uso de Inteligência Artificial
+            portas_por_ip[ip_origem].add(porta_destino)
 
-Este projeto foi desenvolvido com auxílio de ferramentas de IA como suporte de aprendizado.
+            if (agora - tempo_primeiro_pacote[ip_origem]) <= JANELA_TEMPO:
+                if len(portas_por_ip[ip_origem]) >= LIMITE_PORTAS:
+                    suspeito = True
+            else:
+                portas_por_ip[ip_origem].clear()
+                tempo_primeiro_pacote[ip_origem] = agora
 
-A IA foi utilizada para:
+        mensagem = f"[{timestamp}] [{protocolo}] {ip_origem} -> {ip_destino}"
+        if porta_destino:
+            mensagem += f" Porta: {porta_destino}"
 
-Estruturação inicial de código
+        if suspeito:
+            print(f"{VERMELHO}🚨 POSSÍVEL PORT SCAN DETECTADO! {mensagem}{RESET}")
+        else:
+            print(f"{VERDE}{mensagem}{RESET}")
 
-Sugestões de melhorias
+        if salvar_em_arquivo:
+            logs.append([timestamp, protocolo, ip_origem, ip_destino, porta_destino, suspeito])
 
-Refinamento da documentação
+# ================= SALVAR LOG =================
 
-Simulação de boas práticas
+def salvar_log():
+    try:
+        if not os.path.exists(diretorio_salvamento):
+            os.makedirs(diretorio_salvamento, exist_ok=True)
 
-A compreensão técnica, testes e validações foram realizados manualmente como parte do processo formativo.
+        nome_final = nome_personalizado if nome_personalizado else f"log_rede_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        caminho = os.path.join(diretorio_salvamento, f"{nome_final}.{formato_log}")
 
-⚠ Aviso Legal
+        if formato_log == "txt":
+            with open(caminho, "w") as f:
+                for linha in logs:
+                    f.write(str(linha) + "\n")
 
-Ferramenta desenvolvida exclusivamente para fins educacionais.
+        elif formato_log == "csv":
+            with open(caminho, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Timestamp", "Protocolo", "IP Origem", "IP Destino", "Porta", "Suspeito"])
+                writer.writerows(logs)
 
-Utilize apenas em ambientes autorizados ou laboratórios próprios.
+        print(f"\n✅ Log salvo em: {caminho}")
+
+        print(f"\n{AMARELO}📊 IPs mais ativos:{RESET}")
+        for ip, total in sorted(contador_ips.items(), key=lambda x: x[1], reverse=True)[:5]:
+            print(f"{ip} -> {total} pacotes")
+
+    except Exception as e:
+        print(f"{VERMELHO}❌ Erro ao salvar arquivo: {e}{RESET}")
+
+# ================= MENU =================
+
+def menu():
+    global salvar_em_arquivo, diretorio_salvamento, formato_log, nome_personalizado
+
+    banner()
+
+    print("===== MINI IDS =====")
+    print("1 - Monitoramento Tempo Real")
+    print("2 - Monitoramento Tempo Determinado")
+    print("3 - Escanear Portas")
+    opcao = input_opcao("Escolha (1,2,3): ", ["1", "2", "3"])
+
+    if opcao in ["1", "2"]:
+        salvar_em_arquivo = input_sn("Deseja salvar log?")
+
+        if salvar_em_arquivo:
+            diretorio_salvamento = os.path.join(os.path.expanduser("~"), "Downloads")
+            formato_log = input_opcao("Formato (txt/csv): ", ["txt", "csv"])
+            nome_personalizado = input("Nome do arquivo (ENTER para automático): ").strip()
+
+    if opcao == "1":
+        print("\n🔎 Monitorando... CTRL+C para parar\n")
+        try:
+            sniff(prn=analisar_pacote, store=False)
+        except KeyboardInterrupt:
+            if salvar_em_arquivo:
+                salvar_log()
+
+    elif opcao == "2":
+        tempo = int(input("Tempo em segundos: "))
+        sniff(prn=analisar_pacote, store=False, timeout=tempo)
+        if salvar_em_arquivo:
+            salvar_log()
+
+    elif opcao == "3":
+        print("\n⚠️ Use apenas em ambientes autorizados!\n")
+        alvo = input("Digite o IP ou domínio: ")
+        print("Função de scan ativa.")
+
+# ================= START =================
+
+if __name__ == "__main__":
+    menu()
